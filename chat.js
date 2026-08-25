@@ -68,8 +68,14 @@ const PORTRAIT = new Set([
   "레바딘", "카에돈", "녹스", "필리아", "프시케", "리비안", "이그니펠",
 ]);
 const MAX_PICS = 6;
-const MAX_ONE = 400 * 1024;
-const MAX_ALL = 1500 * 1024;
+const MAX_ONE = 60 * 1024;
+const MAX_ALL = 300 * 1024;
+
+// 원본은 한 장에 300~430KB라 그대로 심으면 SVG 가 수 MB 가 된다.
+// 무료 리사이즈 프록시로 96px 썸네일만 받아 base64 로 심는다.
+const thumbUrl = (name) =>
+  `https://wsrv.nl/?url=${IMG_HOST.replace(/^https?:\/\//, "")}${encodeURIComponent(name)}01.webp` +
+  `&w=96&h=96&fit=cover&a=top&output=webp&q=82`;
 
 function toBase64(bytes) {
   if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
@@ -88,8 +94,8 @@ async function loadPortraits(names) {
 
   const got = await Promise.all(uniq.map(async (n) => {
     try {
-      const res = await fetch(`${IMG_HOST}${encodeURIComponent(n)}01.webp`, {
-        cf: { cacheEverything: true, cacheTtl: 86400 },
+      const res = await fetch(thumbUrl(n), {
+        cf: { cacheEverything: true, cacheTtl: 604800 },
       });
       if (!res.ok) return null;
       const type = (res.headers.get("content-type") || "image/webp").split(";")[0].trim();
@@ -258,24 +264,29 @@ function mix(hex, w) {
 // ?x=1 진단: 14명 01 이미지의 상태·용량을 텍스트로 보고
 async function diagnose() {
   const names = [...PORTRAIT];
-  const rows = await Promise.all(names.map(async (n) => {
-    const url = `${IMG_HOST}${encodeURIComponent(n)}01.webp`;
+  const probe = async (url) => {
     try {
       const res = await fetch(url, { cf: { cacheEverything: true, cacheTtl: 86400 } });
       const type = (res.headers.get("content-type") || "-").split(";")[0].trim();
-      if (!res.ok) return `${n}  HTTP ${res.status}  ${type}  -`;
+      if (!res.ok) return { line: `HTTP ${res.status}`, size: 0, type };
       const buf = new Uint8Array(await res.arrayBuffer());
-      const kb = (buf.length / 1024).toFixed(1);
-      const ok = buf.length <= MAX_ONE && /^image\//.test(type) ? "OK" : "제외";
-      return `${n}  HTTP ${res.status}  ${type}  ${kb}KB  ${ok}`;
+      return { line: `${(buf.length / 1024).toFixed(1)}KB`, size: buf.length, type };
     } catch (e) {
-      return `${n}  FETCH 실패  ${String(e).slice(0, 60)}`;
+      return { line: `실패(${String(e).slice(0, 30)})`, size: 0, type: "-" };
     }
+  };
+  const rows = await Promise.all(names.map(async (n) => {
+    const [raw, thumb] = await Promise.all([
+      probe(`${IMG_HOST}${encodeURIComponent(n)}01.webp`),
+      probe(thumbUrl(n)),
+    ]);
+    const ok = thumb.size > 0 && thumb.size <= MAX_ONE && /^image\//.test(thumb.type) ? "OK" : "제외";
+    return `${n}\t원본 ${raw.line}\t썸네일 ${thumb.line} ${thumb.type}\t${ok}`;
   }));
   return [
     "== 인물 01 이미지 진단 ==",
     `호스트 ${IMG_HOST}`,
-    `한 장 상한 ${(MAX_ONE / 1024).toFixed(0)}KB · 합계 상한 ${(MAX_ALL / 1024).toFixed(0)}KB · 최대 ${MAX_PICS}명`,
+    `썸네일 96px · 한 장 상한 ${(MAX_ONE / 1024).toFixed(0)}KB · 합계 ${(MAX_ALL / 1024).toFixed(0)}KB · 최대 ${MAX_PICS}명`,
     `Buffer(nodejs_compat) ${typeof Buffer !== "undefined" ? "있음" : "없음"}`,
     "",
     ...rows,
