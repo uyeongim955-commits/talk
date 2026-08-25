@@ -86,12 +86,17 @@ function toBase64(bytes) {
 }
 
 // 이름 목록에 대응하는 01 이미지를 받아 data URI 로 반환. 실패분은 그냥 빠진다.
+const PIC_TIMEOUT = 2500;
+
 async function loadPortraits(names) {
   const uniq = [...new Set(names)].filter((n) => PORTRAIT.has(n)).slice(0, MAX_PICS);
   const pics = new Map();
   if (!uniq.length) return pics;
 
-  const got = await Promise.all(uniq.map(async (n) => {
+  // 느린 이미지 한 장이 전체 응답을 잡아먹지 않도록 제한시간을 둔다.
+  // 시간 안에 못 받은 인물은 실루엣으로 내려간다.
+  const late = new Promise((res) => setTimeout(() => res(null), PIC_TIMEOUT));
+  const one = async (n) => {
     try {
       const res = await fetch(thumbUrl(n), {
         cf: { cacheEverything: true, cacheTtl: 604800 },
@@ -105,7 +110,8 @@ async function loadPortraits(names) {
     } catch (e) {
       return null;
     }
-  }));
+  };
+  const got = await Promise.all(uniq.map((n) => Promise.race([one(n), late])));
 
   let total = 0;
   for (const g of got) {
@@ -199,7 +205,7 @@ function addTime(base, minutes) {
 
 function parseInput(url) {
   if (url.search.length > 3000) return null;
-  const allowed = new Set(["r", "d", "t", "p", "m", "l", "x"]);
+  const allowed = new Set(["r", "d", "t", "p", "m", "l", "x", "i"]);
   const seen = new Set();
   for (const [key] of url.searchParams) {
     if (!allowed.has(key) || seen.has(key)) return null;
@@ -297,24 +303,24 @@ async function diagnose() {
 function avatar(x, y, s, name, pics) {
   if (pics && pics.has(name)) {
     const id = `p${hash(name).toString(36)}`;
-    return `<use href="#${id}" xlink:href="#${id}" x="${x}" y="${y}" width="${s}" height="${s}" clip-path="url(#rnd)"/>`;
+    return `<use href="#${id}" xlink:href="#${id}" x="${x}" y="${y}" width="${s}" height="${s}"/>`;
   }
   const c = avatarColor(name);
-  return `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="${s * 0.32}" fill="${mix(c, 0.82)}"/>
+  return `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="${s / 2}" fill="${mix(c, 0.82)}"/>
   <circle cx="${x + s / 2}" cy="${y + s * 0.37}" r="${s * 0.163}" fill="${c}"/>
   <path d="M${x + s * 0.21} ${y + s * 0.87} a${s * 0.29} ${s * 0.27} 0 0 1 ${s * 0.58} 0 Z" fill="${c}"/>`;
 }
 
 // 같은 인물이 여러 번 나와도 이미지는 defs 에 한 번만 심는다
 function portraitDefs(pics) {
-  const syms = [...pics.entries()].map(([n, src]) =>
-    `<symbol id="p${hash(n).toString(36)}" viewBox="0 0 100 100" preserveAspectRatio="xMidYMin slice">
-      <image href="${src}" xlink:href="${src}" x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMin slice"/>
-    </symbol>`).join("");
-  return `<defs>
-    <clipPath id="rnd" clipPathUnits="objectBoundingBox"><rect width="1" height="1" rx="0.32" ry="0.32"/></clipPath>
-    ${syms}
-  </defs>`;
+  const syms = [...pics.entries()].map(([n, src]) => {
+    const id = `p${hash(n).toString(36)}`;
+    return `<symbol id="${id}" viewBox="0 0 100 100" preserveAspectRatio="xMidYMin slice">
+      <clipPath id="${id}c"><circle cx="50" cy="50" r="50"/></clipPath>
+      <image href="${src}" xlink:href="${src}" x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMin slice" clip-path="url(#${id}c)"/>
+    </symbol>`;
+  }).join("");
+  return `<defs>${syms}</defs>`;
 }
 
 function chatSvg({ room, day, base, notice, msgs, members }, pics) {
@@ -374,7 +380,7 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
     }
   }
 
-  let y = Math.max(chatTop, chatBottom - hSum);
+  let y = chatTop;
   const CX = W / 2;
 
   let out = "";
@@ -402,9 +408,6 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
     }
 
     out += `<rect x="${BUB_L}" y="${by}" width="${m.bw}" height="${m.bh}" rx="17" fill="${OTHER}"/>`;
-    if (m.head) {
-      out += `<path d="M${BUB_L + 2} ${by + 9} q-9 3 -9 10 q5 -4 9 -3 Z" fill="${OTHER}"/>`;
-    }
     out += m.lines.map((ln, i) =>
       `<text x="${BUB_L + 16}" y="${by + 23 + i * LH}" class="msg">${esc(ln)}</text>`).join("");
 
@@ -511,8 +514,9 @@ export default {
       });
     }
 
+    const noPics = url.searchParams.get("i") === "0";
     const wanted = [...data.msgs.map((m) => m.nick), ...data.members.map((m) => m.name)];
-    const pics = request.method === "HEAD" ? new Map() : await loadPortraits(wanted);
+    const pics = request.method === "HEAD" || noPics ? new Map() : await loadPortraits(wanted);
 
     return new Response(request.method === "HEAD" ? null : chatSvg(data, pics), {
       status: 200,
