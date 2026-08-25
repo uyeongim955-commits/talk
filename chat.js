@@ -68,8 +68,8 @@ const PORTRAIT = new Set([
   "레바딘", "카에돈", "녹스", "필리아", "프시케", "리비안", "이그니펠",
 ]);
 const MAX_PICS = 6;
-const MAX_ONE = 120 * 1024;
-const MAX_ALL = 380 * 1024;
+const MAX_ONE = 400 * 1024;
+const MAX_ALL = 1500 * 1024;
 
 function toBase64(bytes) {
   if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
@@ -194,7 +194,7 @@ function addTime(base, minutes) {
 
 function parseInput(url) {
   if (url.search.length > 3000) return null;
-  const allowed = new Set(["r", "d", "t", "p", "m", "l"]);
+  const allowed = new Set(["r", "d", "t", "p", "m", "l", "x"]);
   const seen = new Set();
   for (const [key] of url.searchParams) {
     if (!allowed.has(key) || seen.has(key)) return null;
@@ -253,6 +253,33 @@ function mix(hex, w) {
   const f = (v) => Math.round(v + (255 - v) * w);
   const out = (f((n >> 16) & 255) << 16) | (f((n >> 8) & 255) << 8) | f(n & 255);
   return "#" + (out | 0x1000000).toString(16).slice(1);
+}
+
+// ?x=1 진단: 14명 01 이미지의 상태·용량을 텍스트로 보고
+async function diagnose() {
+  const names = [...PORTRAIT];
+  const rows = await Promise.all(names.map(async (n) => {
+    const url = `${IMG_HOST}${encodeURIComponent(n)}01.webp`;
+    try {
+      const res = await fetch(url, { cf: { cacheEverything: true, cacheTtl: 86400 } });
+      const type = (res.headers.get("content-type") || "-").split(";")[0].trim();
+      if (!res.ok) return `${n}  HTTP ${res.status}  ${type}  -`;
+      const buf = new Uint8Array(await res.arrayBuffer());
+      const kb = (buf.length / 1024).toFixed(1);
+      const ok = buf.length <= MAX_ONE && /^image\//.test(type) ? "OK" : "제외";
+      return `${n}  HTTP ${res.status}  ${type}  ${kb}KB  ${ok}`;
+    } catch (e) {
+      return `${n}  FETCH 실패  ${String(e).slice(0, 60)}`;
+    }
+  }));
+  return [
+    "== 인물 01 이미지 진단 ==",
+    `호스트 ${IMG_HOST}`,
+    `한 장 상한 ${(MAX_ONE / 1024).toFixed(0)}KB · 합계 상한 ${(MAX_ALL / 1024).toFixed(0)}KB · 최대 ${MAX_PICS}명`,
+    `Buffer(nodejs_compat) ${typeof Buffer !== "undefined" ? "있음" : "없음"}`,
+    "",
+    ...rows,
+  ].join("\n");
 }
 
 // 프로필. 인물 01 이미지가 실리면 사진, 아니면 색 구분 실루엣
@@ -483,6 +510,14 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    if (url.pathname === "/" && url.searchParams.get("x") === "1") {
+      return new Response(request.method === "HEAD" ? null : await diagnose(), {
+        status: 200,
+        headers: { ...responseHeaders("text/plain; charset=utf-8"), "Cache-Control": "no-store" },
+      });
+    }
+
     const data = url.pathname === "/" ? parseInput(url) : null;
     if (!data) {
       return new Response(request.method === "HEAD" ? null : "Invalid parameters.", {
