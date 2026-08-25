@@ -35,14 +35,14 @@ const OTHER = "#ffffff";     // 말풍선
 const ACCENT = "#ef6b4e";    // 안읽음 표시
 const SEND = "#3d5a80";      // 보내기 버튼
 
-const HEAD_B = 46;           // 헤더 바닥
+const HEAD_B = 42;           // 헤더 바닥
 const NOTICE_H = 28;         // 공지 바 높이
-const INPUT_H = 32;          // 입력바 높이
+const INPUT_H = 28;          // 입력바 높이
 const AV_X = 12;             // 프로필 x
 const BUB_L = 54;            // 말풍선 시작 x
 const MAXB = 470;            // 말풍선 최대 폭
 const FS = 17;               // 메시지 글자 크기
-const LH = 23;               // 줄 높이
+const LH = 22;               // 줄 높이
 
 const AVATARS = ["#6b8fd4", "#e0855a", "#4fa189", "#c76b9a", "#7a6bc7", "#d0a13c", "#4f9bb5", "#a8724f"];
 
@@ -361,10 +361,11 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
     m.time = m.kind === "sys" ? "" : addTime(base, g);
   });
 
-  const chatTop = (notice ? HEAD_B + NOTICE_H : HEAD_B) + 7;
-  const chatBottom = H - INPUT_H - 6;
+  const chatTop = (notice ? HEAD_B + NOTICE_H : HEAD_B) + 5;
+  const chatBottom = H - INPUT_H - 4;
 
   const NAME_H = 15;
+  const PAD = 10;
   const laid = [];
   let showDay = !!day;
   let hSum = showDay ? 30 : 0;
@@ -377,8 +378,8 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
     }
     m.lines = wrapText(m.text, FS, MAXB - 28, 3);
     m.bw = Math.min(MAXB, Math.round(Math.max(...m.lines.map((l) => measure(l, FS)))) + 28);
-    m.bh = m.lines.length * LH + 12;
-    m.h = (m.head ? NAME_H : 0) + m.bh + (m.tail ? 7 : 3);
+    m.bh = m.lines.length * LH + PAD;
+    m.h = (m.head ? NAME_H : 0) + m.bh + (m.tail ? 6 : 3);
     laid.push(m);
     hSum += m.h;
   }
@@ -463,14 +464,14 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
 
   <rect x="0" y="0" width="${W}" height="${HEAD_B}" fill="#ffffff"/>
   <line x1="0" y1="${HEAD_B}" x2="${W}" y2="${HEAD_B}" stroke="#d4dbe4"/>
-  <path d="M20 16 L13 23 L20 30" fill="none" stroke="#2f3944" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  ${avatar(30, 10, 26, room, pics)}
-  <text x="64" y="28" class="htitle">${esc(roomLabel)}</text>
-  <rect x="${70 + nameW}" y="14" width="${17 + String(total).length * 6}" height="17" rx="8.5" fill="#eef1f5"/>
-  <text x="${78 + nameW + String(total).length * 3}" y="26" text-anchor="middle" class="hcount">${total}</text>
-  <circle cx="${W - 40}" cy="23" r="1.9" fill="#5c6875"/>
-  <circle cx="${W - 31}" cy="23" r="1.9" fill="#5c6875"/>
-  <circle cx="${W - 22}" cy="23" r="1.9" fill="#5c6875"/>
+  <path d="M19 14 L12 21 L19 28" fill="none" stroke="#2f3944" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  ${avatar(28, 8, 26, room, pics)}
+  <text x="62" y="26" class="htitle">${esc(roomLabel)}</text>
+  <rect x="${68 + nameW}" y="12" width="${17 + String(total).length * 6}" height="17" rx="8.5" fill="#eef1f5"/>
+  <text x="${76 + nameW + String(total).length * 3}" y="24" text-anchor="middle" class="hcount">${total}</text>
+  <circle cx="${W - 40}" cy="21" r="1.9" fill="#5c6875"/>
+  <circle cx="${W - 31}" cy="21" r="1.9" fill="#5c6875"/>
+  <circle cx="${W - 22}" cy="21" r="1.9" fill="#5c6875"/>
 
   ${notice ? `<rect x="0" y="${HEAD_B}" width="${W}" height="${NOTICE_H}" fill="#fdf3d4"/>
   <line x1="0" y1="${HEAD_B + NOTICE_H}" x2="${W}" y2="${HEAD_B + NOTICE_H}" stroke="#efe2b4"/>
@@ -481,12 +482,12 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
 
   <rect x="0" y="${H - INPUT_H}" width="${W}" height="${INPUT_H}" fill="#ffffff"/>
   <line x1="0" y1="${H - INPUT_H}" x2="${W}" y2="${H - INPUT_H}" stroke="#d4dbe4"/>
-  <line x1="14" y1="${H - 16}" x2="26" y2="${H - 16}" stroke="#98a3b0" stroke-width="1.8" stroke-linecap="round"/>
-  <line x1="20" y1="${H - 22}" x2="20" y2="${H - 10}" stroke="#98a3b0" stroke-width="1.8" stroke-linecap="round"/>
-  <rect x="36" y="${H - 25}" width="${W - 78}" height="18" rx="9" fill="#f0f3f7"/>
-  <text x="48" y="${H - 12}" class="ph">메시지 입력</text>
-  <circle cx="${W - 21}" cy="${H - 16}" r="11" fill="${SEND}"/>
-  <path d="M${W - 27} ${H - 21} L${W - 15} ${H - 16} L${W - 27} ${H - 11} L${W - 24.5} ${H - 16} Z" fill="#ffffff"/>
+  <line x1="14" y1="${H - 14}" x2="26" y2="${H - 14}" stroke="#98a3b0" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="20" y1="${H - 20}" x2="20" y2="${H - 8}" stroke="#98a3b0" stroke-width="1.8" stroke-linecap="round"/>
+  <rect x="36" y="${H - 22}" width="${W - 78}" height="16" rx="8" fill="#f0f3f7"/>
+  <text x="48" y="${H - 10}" class="ph">메시지 입력</text>
+  <circle cx="${W - 20}" cy="${H - 14}" r="10" fill="${SEND}"/>
+  <path d="M${W - 26} ${H - 19} L${W - 14} ${H - 14} L${W - 26} ${H - 9} L${W - 23.5} ${H - 14} Z" fill="#ffffff"/>
 </svg>`;
 }
 
