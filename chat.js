@@ -1,19 +1,20 @@
 /**
- * 단톡방 SVG Worker · 1000x640
- * 카카오톡/라인/인스타 DM 을 참고한 자체 메신저 UI. 좌측 멤버 패널 + 우측 대화.
+ * 단톡방 SVG Worker · 640x860 (세로형)
+ * 카카오톡/라인/인스타 DM 참고. 상단 참여자 띠 + 단일 컬럼 대화.
  *
  * 파라미터
- * - r: 방 이름 (예: 용살단 3분대)
- * - d: 날짜 구분선 문구 (예: 2045년 7월 14일 금요일)
- * - t: 시작 시각 HH:MM (말풍선 묶음마다 1분씩 진행)
+ * - r: 방 이름
+ * - d: 날짜 구분선 문구
+ * - t: 시작 시각 HH:MM (발화 묶음마다 1분씩 진행)
  * - p: 상단 고정 공지 1줄 (생략 가능)
- * - m: 멤버 "이름" 또는 "이름~상태메시지", ; 구분 (최대 6). 생략 시 발신자에서 자동 추출
- * - l: 메시지, ; 구분 (최대 10)
- *      상대  : 닉~내용   또는 닉~내용~안읽음수
- *      나    : >내용     또는 >내용~안읽음수
- *      시스템: !내용     (가운데 회색 칩)
+ * - m: 멤버 "이름", ; 구분 (최대 7). 생략 시 발신자에서 자동 추출
+ * - l: 메시지, ; 구분 (최대 16)
+ *      발화  : 닉~내용  또는 닉~내용~안읽음수
+ *      시스템: !내용    (가운데 회색 칩)
+ *      ※ 유저 말풍선 없음. 전부 ⓒ 발화만.
+ * - x=1: 인물 이미지 진단 (텍스트 출력)
  *
- * 같은 사람이 연달아 말하면 프로필·이름은 첫 줄에만, 시각은 마지막 줄에만 붙음.
+ * 같은 사람이 연달아 말하면 프로필·이름은 첫 줄에만, 시각은 마지막 줄에만.
  * 공백은 + 로 표기. 퍼센트 인코딩 불필요.
  *
  * 주의: 대화 내용이 URL 에 실려 Cloudflare 네트워크를 경유함.
@@ -22,26 +23,24 @@
  * 방어
  * - 허용 파라미터 외 키·중복 키·3000자 초과 쿼리는 400.
  * - 모든 텍스트의 XML 특수문자는 이스케이프.
- * - 외부 통신·저장소·분석 코드 없음. IP·헤더·쿠키 미참조.
+ * - 이미지는 고정 호스트의 [주연 14명]01.webp 만. 임의 URL 불가.
  */
 
-const W = 860;
-const H = 640;
+const W = 640;
+const H = 860;
 
 const BG = "#93a8c4";        // 대화 배경
-const MINE = "#ffe6a3";      // 내 말풍선
-const OTHER = "#ffffff";     // 상대 말풍선
-const PANEL = "#ffffff";     // 좌측 패널
+const MINE = "#ffe6a3";      // 보내기 버튼 강조
+const OTHER = "#ffffff";     // 말풍선
 const ACCENT = "#e8654a";    // 안읽음 표시
 
-const PANEL_W = 210;
-const CHAT_L = PANEL_W;
-const AV_X = 228;            // 상대 프로필 x
-const BUB_L = 272;           // 상대 말풍선 시작 x
-const BUB_R = 836;           // 내 말풍선 끝 x
-const MAXB = 348;            // 말풍선 최대 폭
-const FS = 15.5;             // 메시지 글자 크기
-const LH = 22;               // 줄 높이
+const STRIP_B = 116;         // 헤더 + 참여자 띠 바닥
+const AV_STEP = 56;          // 참여자 띠 간격
+const AV_X = 22;             // 대화 프로필 x
+const BUB_L = 66;            // 말풍선 시작 x
+const MAXB = 462;            // 말풍선 최대 폭
+const FS = 16.5;             // 메시지 글자 크기
+const LH = 23;               // 줄 높이
 
 const AVATARS = ["#6b8fd4", "#e0855a", "#4fa189", "#c76b9a", "#7a6bc7", "#d0a13c", "#4f9bb5", "#a8724f"];
 
@@ -213,11 +212,11 @@ function parseInput(url) {
   const base = /^\d{1,2}:\d{2}$/.test(get("t")) ? get("t") : "20:10";
   const notice = get("p").slice(0, 44);
 
-  const msgs = get("l").split(/[;|]/).map((s) => s.trim()).filter(Boolean).slice(0, 10).map((row) => {
+  const msgs = get("l").split(/[;|]/).map((s) => s.trim()).filter(Boolean).slice(0, 16).map((row) => {
     let r = row;
     let kind = "other";
-    if (r.startsWith(">")) { kind = "mine"; r = r.slice(1).trim(); }
-    else if (r.startsWith("!")) { kind = "sys"; r = r.slice(1).trim(); }
+    if (r.startsWith("!")) { kind = "sys"; r = r.slice(1).trim(); }
+    r = r.replace(/^>+/, "").trim();   // 유저 말풍선은 두지 않는다
 
     let unread = "";
     const u = r.lastIndexOf("~");
@@ -227,7 +226,6 @@ function parseInput(url) {
     }
 
     if (kind === "sys") return { kind, nick: "", text: r.slice(0, 60), unread: "" };
-    if (kind === "mine") return { kind, nick: "", text: r.slice(0, 120), unread };
 
     const k = r.indexOf("~");
     let nick = k === -1 ? "" : r.slice(0, k).trim();
@@ -237,7 +235,7 @@ function parseInput(url) {
     return { kind, nick: fullName((nick || "익명").slice(0, 12)), text: text.slice(0, 120), unread };
   }).filter((m) => m.text);
 
-  let members = get("m").split(/[;|]/).map((s) => s.trim()).filter(Boolean).slice(0, 6).map((row) => {
+  let members = get("m").split(/[;|]/).map((s) => s.trim()).filter(Boolean).slice(0, 7).map((row) => {
     const k = row.indexOf("~");
     return {
       name: fullName((k === -1 ? row : row.slice(0, k)).trim().slice(0, 12)) || "익명",
@@ -247,7 +245,7 @@ function parseInput(url) {
   if (!members.length) {
     const uniq = [];
     for (const m of msgs) if (m.kind === "other" && !uniq.includes(m.nick)) uniq.push(m.nick);
-    members = uniq.slice(0, 6).map((name) => ({ name, note: "" }));
+    members = uniq.slice(0, 7).map((name) => ({ name, note: "" }));
   }
 
   return { room, day, base, notice, msgs, members };
@@ -294,9 +292,12 @@ async function diagnose() {
 }
 
 // 프로필. 인물 01 이미지가 실리면 사진, 아니면 색 구분 실루엣
+// 프로필. 인물 01 썸네일이 실리면 사진, 아니면 색 구분 실루엣
+// 구형 안드로이드 WebView 대응으로 href 와 xlink:href 를 함께 준다
 function avatar(x, y, s, name, pics) {
   if (pics && pics.has(name)) {
-    return `<use href="#p${hash(name).toString(36)}" x="${x}" y="${y}" width="${s}" height="${s}" clip-path="url(#rnd)"/>`;
+    const id = `p${hash(name).toString(36)}`;
+    return `<use href="#${id}" xlink:href="#${id}" x="${x}" y="${y}" width="${s}" height="${s}" clip-path="url(#rnd)"/>`;
   }
   const c = avatarColor(name);
   return `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="${s * 0.34}" fill="${mix(c, 0.8)}"/>
@@ -308,7 +309,7 @@ function avatar(x, y, s, name, pics) {
 function portraitDefs(pics) {
   const syms = [...pics.entries()].map(([n, src]) =>
     `<symbol id="p${hash(n).toString(36)}" viewBox="0 0 100 100" preserveAspectRatio="xMidYMin slice">
-      <image href="${src}" x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMin slice"/>
+      <image href="${src}" xlink:href="${src}" x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMin slice"/>
     </symbol>`).join("");
   return `<defs>
     <clipPath id="rnd" clipPathUnits="objectBoundingBox"><rect width="1" height="1" rx="0.34" ry="0.34"/></clipPath>
@@ -316,29 +317,19 @@ function portraitDefs(pics) {
   </defs>`;
 }
 
-function sidePanel({ room, members }, pics) {
-  const total = members.length + 1;
-  const rows = members.map((m, i) => {
-    const y = 200 + i * 44;
-    const nameY = m.note ? y + 13 : y + 19;
-    return `${avatar(22, y, 28, m.name, pics)}
-    <text x="58" y="${nameY}" class="mname">${esc(clip(m.name, 14, 124))}</text>
-    ${m.note ? `<text x="58" y="${y + 27}" class="mnote">${esc(clip(m.note, 11.5, 130))}</text>` : ""}`;
+// 상단 참여자 띠 (프로필 + 이름)
+function memberStrip(members, pics) {
+  const n = Math.min(members.length, 7);
+  const step = Math.min(AV_STEP, Math.floor((W - 40) / Math.max(n, 1)));
+  return members.slice(0, n).map((m, i) => {
+    const x = 22 + i * step;
+    return `${avatar(x, 66, 32, m.name, pics)}
+    <text x="${x + 16}" y="${STRIP_B - 8}" text-anchor="middle" class="sname">${esc(clip(m.name, 11, step - 2))}</text>`;
   }).join("");
-
-  return `
-  <rect x="0" y="58" width="${PANEL_W}" height="${H - 58}" fill="${PANEL}"/>
-  <line x1="${PANEL_W}" y1="58" x2="${PANEL_W}" y2="${H}" stroke="#d3dae4"/>
-  ${avatar(22, 78, 48, room, pics)}
-  <text x="78" y="99" class="rname">${esc(clip(room, 16.5, 106))}</text>
-  <text x="78" y="119" class="rsub">멤버 ${total}명</text>
-  <line x1="22" y1="154" x2="188" y2="154" stroke="#eceff3"/>
-  <text x="22" y="178" class="mlabel">대화상대 ${members.length}</text>
-  ${rows}`;
 }
 
 function chatSvg({ room, day, base, notice, msgs, members }, pics) {
-  const total = members.length + 1;
+  const total = members.length;
 
   // 같은 사람 연속 발화 묶기
   const items = msgs.map((m, i) => {
@@ -351,109 +342,89 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
     m.tail = !next || next.kind !== m.kind || next.nick !== m.nick || m.kind === "sys";
   });
 
-  // 묶음 번호로 시각 배정
+  // 발화 묶음마다 1분씩 진행
   let g = -1;
   items.forEach((m) => {
     if (m.head) g += 1;
     m.time = m.kind === "sys" ? "" : addTime(base, g);
   });
 
-  // 높이 계산
+  const chatTop = (notice ? STRIP_B + 38 : STRIP_B) + 12;
+  const chatBottom = H - 82;
+
+  // 높이 계산 후 아래에서부터 채운다
   const laid = [];
-  let hSum = day ? 42 : 0;
+  let hSum = day ? 40 : 0;
   for (const m of items) {
     if (m.kind === "sys") {
-      m.h = 40;
+      m.h = 38;
       laid.push(m);
-      hSum += 40;
+      hSum += 38;
       continue;
     }
     m.lines = wrapText(m.text, FS, MAXB - 30, 4);
     m.bw = Math.min(MAXB, Math.round(Math.max(...m.lines.map((l) => measure(l, FS)))) + 30);
-    m.bh = m.lines.length * LH + 20;
-    m.h = (m.head && m.kind === "other" ? 20 : 0) + m.bh + (m.tail ? 12 : 5);
+    m.bh = m.lines.length * LH + 16;
+    m.h = (m.head ? 18 : 0) + m.bh + (m.tail ? 9 : 4);
     laid.push(m);
     hSum += m.h;
   }
 
-  const chatTop = notice ? 104 : 70;
-  const chatBottom = 572;
   let y = Math.max(chatTop, chatBottom - hSum);
-  const CX = (CHAT_L + W) / 2;
+  const CX = W / 2;
 
   let out = "";
   if (day) {
     const dw = Math.round(measure(day, 12.5)) + 30;
-    out += `<rect x="${CX - dw / 2}" y="${y + 4}" width="${dw}" height="26" rx="13" fill="#000000" opacity=".16"/>
-    <text x="${CX}" y="${y + 22}" text-anchor="middle" class="day">${esc(day)}</text>`;
-    y += 42;
+    out += `<rect x="${CX - dw / 2}" y="${y + 3}" width="${dw}" height="26" rx="13" fill="#000000" opacity=".16"/>
+    <text x="${CX}" y="${y + 21}" text-anchor="middle" class="day">${esc(day)}</text>`;
+    y += 40;
   }
 
   for (const m of laid) {
     if (m.kind === "sys") {
       const sw = Math.round(measure(m.text, 12.5)) + 30;
-      out += `<rect x="${CX - sw / 2}" y="${y + 3}" width="${sw}" height="26" rx="13" fill="#000000" opacity=".13"/>
-      <text x="${CX}" y="${y + 21}" text-anchor="middle" class="sys">${esc(m.text)}</text>`;
+      out += `<rect x="${CX - sw / 2}" y="${y + 2}" width="${sw}" height="26" rx="13" fill="#000000" opacity=".13"/>
+      <text x="${CX}" y="${y + 20}" text-anchor="middle" class="sys">${esc(m.text)}</text>`;
       y += m.h;
       continue;
     }
 
-    const mine = m.kind === "mine";
     let by = y;
-
-    if (m.head && !mine) {
-      out += `${avatar(AV_X, y, 36, m.nick, pics)}
-      <text x="${BUB_L}" y="${y + 12}" class="mn">${esc(clip(m.nick, 12.5, 200))}</text>`;
-      by = y + 20;
+    if (m.head) {
+      out += `${avatar(AV_X, y, 34, m.nick, pics)}
+      <text x="${BUB_L}" y="${y + 11}" class="mn">${esc(clip(m.nick, 12.5, 220))}</text>`;
+      by = y + 18;
     }
 
-    const bx = mine ? BUB_R - m.bw : BUB_L;
-    const fill = mine ? MINE : OTHER;
-
-    out += `<rect x="${bx}" y="${by}" width="${m.bw}" height="${m.bh}" rx="14" fill="${fill}"/>`;
+    out += `<rect x="${BUB_L}" y="${by}" width="${m.bw}" height="${m.bh}" rx="13" fill="${OTHER}"/>`;
     if (m.head) {
-      out += mine
-        ? `<path d="M${bx + m.bw} ${by + 11} L${bx + m.bw + 7} ${by + 14} L${bx + m.bw} ${by + 21} Z" fill="${fill}"/>`
-        : `<path d="M${bx} ${by + 11} L${bx - 7} ${by + 14} L${bx} ${by + 21} Z" fill="${fill}"/>`;
+      out += `<path d="M${BUB_L} ${by + 10} L${BUB_L - 7} ${by + 13} L${BUB_L} ${by + 20} Z" fill="${OTHER}"/>`;
     }
     out += m.lines.map((ln, i) =>
-      `<text x="${bx + 15}" y="${by + 24 + i * LH}" class="msg">${esc(ln)}</text>`).join("");
+      `<text x="${BUB_L + 15}" y="${by + 22 + i * LH}" class="msg">${esc(ln)}</text>`).join("");
 
     if (m.tail || m.unread) {
       const stampY = by + m.bh - 4;
-      const stamp = m.tail ? m.time : "";
-      if (mine) {
-        const sx = bx - 8;
-        if (stamp) out += `<text x="${sx}" y="${stampY}" text-anchor="end" class="time">${stamp}</text>`;
-        if (m.unread) {
-          const ux = stamp ? sx - Math.round(measure(stamp, 11.5)) - 7 : sx;
-          out += `<text x="${ux}" y="${stampY}" text-anchor="end" class="unread">${esc(m.unread)}</text>`;
-        }
-      } else {
-        let sx = bx + m.bw + 8;
-        if (m.unread) {
-          out += `<text x="${sx}" y="${stampY}" class="unread">${esc(m.unread)}</text>`;
-          sx += Math.round(measure(m.unread, 11.5)) + 7;
-        }
-        if (stamp) out += `<text x="${sx}" y="${stampY}" class="time">${stamp}</text>`;
+      let sx = BUB_L + m.bw + 8;
+      if (m.unread) {
+        out += `<text x="${sx}" y="${stampY}" class="unread">${esc(m.unread)}</text>`;
+        sx += Math.round(measure(m.unread, 11.5)) + 6;
       }
+      if (m.tail) out += `<text x="${sx}" y="${stampY}" class="time">${m.time}</text>`;
     }
     y += m.h;
   }
 
-  const roomLabel = clip(room, 18, 240);
+  const roomLabel = clip(room, 18, W - 220);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="단톡방 ${esc(room)}">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="단톡방 ${esc(room)}">
   <style>
     text { font-family: system-ui, -apple-system, "SamsungOne", "Samsung Sans", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
     .htitle { font-size: 18px; font-weight: 700; fill: #14171b; letter-spacing: -.6px; }
     .hcount { font-size: 15px; font-weight: 600; fill: #9aa3ad; letter-spacing: -.3px; }
-    .rname { font-size: 17px; font-weight: 700; fill: #14171b; letter-spacing: -.6px; }
-    .rsub { font-size: 12.5px; font-weight: 500; fill: #9aa3ad; letter-spacing: -.2px; }
-    .mlabel { font-size: 12px; font-weight: 700; fill: #a4adb8; letter-spacing: -.2px; }
-    .mname { font-size: 14px; font-weight: 600; fill: #2b3138; letter-spacing: -.3px; }
-    .mnote { font-size: 11.5px; font-weight: 450; fill: #a4adb8; letter-spacing: -.2px; }
+    .sname { font-size: 11px; font-weight: 600; fill: #6b747e; letter-spacing: -.4px; }
     .notice { font-size: 13px; font-weight: 600; fill: #6b5320; letter-spacing: -.3px; }
     .day { font-size: 12.5px; font-weight: 600; fill: #ffffff; letter-spacing: -.2px; }
     .sys { font-size: 12.5px; font-weight: 500; fill: #ffffff; letter-spacing: -.2px; }
@@ -463,38 +434,37 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
     .unread { font-size: 11.5px; font-weight: 700; fill: ${ACCENT}; letter-spacing: -.1px; }
     .ph { font-size: 14px; font-weight: 450; fill: #a4adb8; letter-spacing: -.3px; }
   </style>
-
   ${portraitDefs(pics)}
+
   <rect width="${W}" height="${H}" fill="${BG}"/>
-  ${sidePanel({ room, members }, pics)}
 
-  <rect x="0" y="0" width="${W}" height="58" fill="#ffffff"/>
-  <line x1="0" y1="58" x2="${W}" y2="58" stroke="#d3dae4"/>
-  <path d="M34 22 L26 30 L34 38" fill="none" stroke="#3b444e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="54" y="36" class="htitle">${esc(roomLabel)}</text>
-  <text x="${60 + Math.round(measure(roomLabel, 18))}" y="36" class="hcount">${total}</text>
-  <circle cx="780" cy="28" r="7" fill="none" stroke="#6b747e" stroke-width="2"/>
-  <line x1="785" y1="33" x2="791" y2="39" stroke="#6b747e" stroke-width="2" stroke-linecap="round"/>
-  <line x1="808" y1="23" x2="830" y2="23" stroke="#6b747e" stroke-width="2" stroke-linecap="round"/>
-  <line x1="808" y1="30" x2="830" y2="30" stroke="#6b747e" stroke-width="2" stroke-linecap="round"/>
-  <line x1="808" y1="37" x2="830" y2="37" stroke="#6b747e" stroke-width="2" stroke-linecap="round"/>
+  <rect x="0" y="0" width="${W}" height="${STRIP_B}" fill="#ffffff"/>
+  <line x1="0" y1="${STRIP_B}" x2="${W}" y2="${STRIP_B}" stroke="#d3dae4"/>
+  <path d="M30 22 L22 30 L30 38" fill="none" stroke="#3b444e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="48" y="36" class="htitle">${esc(roomLabel)}</text>
+  <text x="${54 + Math.round(measure(roomLabel, 18))}" y="36" class="hcount">${total}</text>
+  <line x1="${W - 46}" y1="23" x2="${W - 22}" y2="23" stroke="#6b747e" stroke-width="2" stroke-linecap="round"/>
+  <line x1="${W - 46}" y1="30" x2="${W - 22}" y2="30" stroke="#6b747e" stroke-width="2" stroke-linecap="round"/>
+  <line x1="${W - 46}" y1="37" x2="${W - 22}" y2="37" stroke="#6b747e" stroke-width="2" stroke-linecap="round"/>
+  <line x1="0" y1="58" x2="${W}" y2="58" stroke="#eef1f5"/>
+  ${memberStrip(members, pics)}
 
-  ${notice ? `<rect x="${CHAT_L}" y="58" width="${W - CHAT_L}" height="38" fill="#fff4d1"/>
-  <line x1="${CHAT_L}" y1="96" x2="${W}" y2="96" stroke="#f0e0ae"/>
-  <circle cx="${CHAT_L + 30}" cy="77" r="8" fill="#e8b93c"/>
-  <path d="M${CHAT_L + 27} 74 h6 v3 l-3 5 l-3 -5 Z" fill="#ffffff"/>
-  <text x="${CHAT_L + 48}" y="82" class="notice">${esc(clip(notice, 13, W - CHAT_L - 72))}</text>` : ""}
+  ${notice ? `<rect x="0" y="${STRIP_B}" width="${W}" height="38" fill="#fff4d1"/>
+  <line x1="0" y1="${STRIP_B + 38}" x2="${W}" y2="${STRIP_B + 38}" stroke="#f0e0ae"/>
+  <circle cx="34" cy="${STRIP_B + 19}" r="8" fill="#e8b93c"/>
+  <path d="M31 ${STRIP_B + 16} h6 v3 l-3 5 l-3 -5 Z" fill="#ffffff"/>
+  <text x="52" y="${STRIP_B + 24}" class="notice">${esc(clip(notice, 13, W - 74))}</text>` : ""}
 
   ${out}
 
-  <rect x="${CHAT_L}" y="578" width="${W - CHAT_L}" height="${H - 578}" fill="#ffffff"/>
-  <line x1="${CHAT_L}" y1="578" x2="${W}" y2="578" stroke="#d3dae4"/>
-  <line x1="${CHAT_L + 24}" y1="609" x2="${CHAT_L + 42}" y2="609" stroke="#8a939d" stroke-width="2" stroke-linecap="round"/>
-  <line x1="${CHAT_L + 33}" y1="600" x2="${CHAT_L + 33}" y2="618" stroke="#8a939d" stroke-width="2" stroke-linecap="round"/>
-  <rect x="${CHAT_L + 56}" y="594" width="${BUB_R - CHAT_L - 112}" height="32" rx="16" fill="#f1f4f7"/>
-  <text x="${CHAT_L + 74}" y="615" class="ph">메시지 입력</text>
-  <circle cx="${BUB_R - 24}" cy="610" r="17" fill="${MINE}"/>
-  <path d="M${BUB_R - 33} 603 L${BUB_R - 15} 610 L${BUB_R - 33} 617 L${BUB_R - 29} 610 Z" fill="#7a5f14"/>
+  <rect x="0" y="${H - 68}" width="${W}" height="68" fill="#ffffff"/>
+  <line x1="0" y1="${H - 68}" x2="${W}" y2="${H - 68}" stroke="#d3dae4"/>
+  <line x1="24" y1="${H - 34}" x2="42" y2="${H - 34}" stroke="#8a939d" stroke-width="2" stroke-linecap="round"/>
+  <line x1="33" y1="${H - 43}" x2="33" y2="${H - 25}" stroke="#8a939d" stroke-width="2" stroke-linecap="round"/>
+  <rect x="56" y="${H - 50}" width="${W - 112}" height="32" rx="16" fill="#f1f4f7"/>
+  <text x="74" y="${H - 29}" class="ph">메시지 입력</text>
+  <circle cx="${W - 30}" cy="${H - 34}" r="17" fill="${MINE}"/>
+  <path d="M${W - 39} ${H - 41} L${W - 21} ${H - 34} L${W - 39} ${H - 27} L${W - 35} ${H - 34} Z" fill="#7a5f14"/>
 </svg>`;
 }
 
