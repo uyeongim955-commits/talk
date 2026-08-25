@@ -45,17 +45,71 @@ const LH = 22;               // 줄 높이
 
 const AVATARS = ["#6b8fd4", "#e0855a", "#4fa189", "#c76b9a", "#7a6bc7", "#d0a13c", "#4f9bb5", "#a8724f"];
 
-// 주요 인물 고정 프로필색 — 어느 이미지에서도 같은 색·같은 이니셜로 보이게
+// 주연 14명 고정 프로필색 — 초상을 못 받았을 때도 인물이 구분되게
 const CHARS = {
-  "강도현": "#c85a22", "한해원": "#8c2f39", "정태양": "#c08810",
-  "윤아린": "#2f6b8c", "임온유": "#3f8f6a", "주이준": "#6b5bb5", "문가인": "#a84f85",
+  "강도현": "#c85a22", "한혜원": "#8c2f39", "정태양": "#c08810", "윤아린": "#2f6b8c",
+  "박연아": "#6f9e4f", "이준": "#465a78", "문가인": "#8a4fa8",
+  "레바딘": "#2f7f9e", "카에돈": "#b8371f", "녹스": "#2e5c46", "필리아": "#d1452e",
+  "프시케": "#3f9fb5", "리비안": "#4a4560", "이그니펠": "#d97b1f",
 };
+// 성 없이 불러도 풀네임으로 정규화 (URL 단축 + 표기 통일)
 const ALIAS = {
-  "도현": "강도현", "해원": "한해원", "태양": "정태양", "아린": "윤아린",
-  "온유": "임온유", "이준": "주이준", "가인": "문가인",
+  "도현": "강도현", "혜원": "한혜원", "해원": "한혜원", "태양": "정태양",
+  "아린": "윤아린", "연아": "박연아", "가인": "문가인",
 };
 const fullName = (n) => ALIAS[n] || n;
 const avatarColor = (n) => CHARS[n] || AVATARS[hash(n) % AVATARS.length];
+
+// 인물 기본이미지(01). SVG 는 <img> 로 로드되면 외부 이미지를 못 받으므로
+// 워커가 직접 받아 base64 로 심는다. 호스트·파일명 모두 고정 — 임의 URL 금지.
+const IMG_HOST = "https://5aaa.uk/";
+const PORTRAIT = new Set([
+  "강도현", "한혜원", "정태양", "윤아린", "박연아", "이준", "문가인",
+  "레바딘", "카에돈", "녹스", "필리아", "프시케", "리비안", "이그니펠",
+]);
+const MAX_PICS = 6;
+const MAX_ONE = 120 * 1024;
+const MAX_ALL = 380 * 1024;
+
+function toBase64(bytes) {
+  if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(s);
+}
+
+// 이름 목록에 대응하는 01 이미지를 받아 data URI 로 반환. 실패분은 그냥 빠진다.
+async function loadPortraits(names) {
+  const uniq = [...new Set(names)].filter((n) => PORTRAIT.has(n)).slice(0, MAX_PICS);
+  const pics = new Map();
+  if (!uniq.length) return pics;
+
+  const got = await Promise.all(uniq.map(async (n) => {
+    try {
+      const res = await fetch(`${IMG_HOST}${encodeURIComponent(n)}01.webp`, {
+        cf: { cacheEverything: true, cacheTtl: 86400 },
+      });
+      if (!res.ok) return null;
+      const type = (res.headers.get("content-type") || "image/webp").split(";")[0].trim();
+      if (!/^image\//.test(type)) return null;
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (!buf.length || buf.length > MAX_ONE) return null;
+      return [n, buf, type];
+    } catch (e) {
+      return null;
+    }
+  }));
+
+  let total = 0;
+  for (const g of got) {
+    if (!g || total + g[1].length > MAX_ALL) continue;
+    total += g[1].length;
+    pics.set(g[0], `data:${g[2]};base64,${toBase64(g[1])}`);
+  }
+  return pics;
+}
 
 function esc(str) {
   return str.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -193,20 +247,43 @@ function parseInput(url) {
   return { room, day, base, notice, msgs, members };
 }
 
-// 프로필 이미지 (둥근 사각 + 이니셜)
-function avatar(x, y, s, name) {
-  const fill = avatarColor(name);
-  const ch = [...name][0] || "?";
-  return `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="${s * 0.34}" fill="${fill}"/>
-  <text x="${x + s / 2}" y="${y + s * 0.66}" text-anchor="middle" font-size="${s * 0.44}px" font-weight="700" fill="#ffffff">${esc(ch)}</text>`;
+// 색을 흰색과 섞어 옅은 배경 톤을 만든다
+function mix(hex, w) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v) => Math.round(v + (255 - v) * w);
+  const out = (f((n >> 16) & 255) << 16) | (f((n >> 8) & 255) << 8) | f(n & 255);
+  return "#" + (out | 0x1000000).toString(16).slice(1);
 }
 
-function sidePanel({ room, members }) {
+// 프로필. 인물 01 이미지가 실리면 사진, 아니면 색 구분 실루엣
+function avatar(x, y, s, name, pics) {
+  if (pics && pics.has(name)) {
+    return `<use href="#p${hash(name).toString(36)}" x="${x}" y="${y}" width="${s}" height="${s}" clip-path="url(#rnd)"/>`;
+  }
+  const c = avatarColor(name);
+  return `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="${s * 0.34}" fill="${mix(c, 0.8)}"/>
+  <circle cx="${x + s / 2}" cy="${y + s * 0.37}" r="${s * 0.165}" fill="${c}"/>
+  <path d="M${x + s * 0.21} ${y + s * 0.87} a${s * 0.29} ${s * 0.27} 0 0 1 ${s * 0.58} 0 Z" fill="${c}"/>`;
+}
+
+// 같은 인물이 여러 번 나와도 이미지는 defs 에 한 번만 심는다
+function portraitDefs(pics) {
+  const syms = [...pics.entries()].map(([n, src]) =>
+    `<symbol id="p${hash(n).toString(36)}" viewBox="0 0 100 100" preserveAspectRatio="xMidYMin slice">
+      <image href="${src}" x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMin slice"/>
+    </symbol>`).join("");
+  return `<defs>
+    <clipPath id="rnd" clipPathUnits="objectBoundingBox"><rect width="1" height="1" rx="0.34" ry="0.34"/></clipPath>
+    ${syms}
+  </defs>`;
+}
+
+function sidePanel({ room, members }, pics) {
   const total = members.length + 1;
   const rows = members.map((m, i) => {
     const y = 200 + i * 44;
     const nameY = m.note ? y + 13 : y + 19;
-    return `${avatar(22, y, 28, m.name)}
+    return `${avatar(22, y, 28, m.name, pics)}
     <text x="58" y="${nameY}" class="mname">${esc(clip(m.name, 14, 124))}</text>
     ${m.note ? `<text x="58" y="${y + 27}" class="mnote">${esc(clip(m.note, 11.5, 130))}</text>` : ""}`;
   }).join("");
@@ -214,7 +291,7 @@ function sidePanel({ room, members }) {
   return `
   <rect x="0" y="58" width="${PANEL_W}" height="${H - 58}" fill="${PANEL}"/>
   <line x1="${PANEL_W}" y1="58" x2="${PANEL_W}" y2="${H}" stroke="#d3dae4"/>
-  ${avatar(22, 78, 48, room)}
+  ${avatar(22, 78, 48, room, pics)}
   <text x="78" y="99" class="rname">${esc(clip(room, 16.5, 106))}</text>
   <text x="78" y="119" class="rsub">멤버 ${total}명</text>
   <line x1="22" y1="154" x2="188" y2="154" stroke="#eceff3"/>
@@ -222,7 +299,7 @@ function sidePanel({ room, members }) {
   ${rows}`;
 }
 
-function chatSvg({ room, day, base, notice, msgs, members }) {
+function chatSvg({ room, day, base, notice, msgs, members }, pics) {
   const total = members.length + 1;
 
   // 같은 사람 연속 발화 묶기
@@ -287,7 +364,7 @@ function chatSvg({ room, day, base, notice, msgs, members }) {
     let by = y;
 
     if (m.head && !mine) {
-      out += `${avatar(AV_X, y, 36, m.nick)}
+      out += `${avatar(AV_X, y, 36, m.nick, pics)}
       <text x="${BUB_L}" y="${y + 12}" class="mn">${esc(clip(m.nick, 12.5, 200))}</text>`;
       by = y + 20;
     }
@@ -349,8 +426,9 @@ function chatSvg({ room, day, base, notice, msgs, members }) {
     .ph { font-size: 14px; font-weight: 450; fill: #a4adb8; letter-spacing: -.3px; }
   </style>
 
+  ${portraitDefs(pics)}
   <rect width="${W}" height="${H}" fill="${BG}"/>
-  ${sidePanel({ room, members })}
+  ${sidePanel({ room, members }, pics)}
 
   <rect x="0" y="0" width="${W}" height="58" fill="#ffffff"/>
   <line x1="0" y1="58" x2="${W}" y2="58" stroke="#d3dae4"/>
@@ -413,7 +491,10 @@ export default {
       });
     }
 
-    return new Response(request.method === "HEAD" ? null : chatSvg(data), {
+    const wanted = [...data.members.map((m) => m.name), ...data.msgs.map((m) => m.nick)];
+    const pics = request.method === "HEAD" ? new Map() : await loadPortraits(wanted);
+
+    return new Response(request.method === "HEAD" ? null : chatSvg(data, pics), {
       status: 200,
       headers: responseHeaders("image/svg+xml; charset=utf-8"),
     });

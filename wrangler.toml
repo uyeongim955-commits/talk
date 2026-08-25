@@ -1,6 +1,7 @@
 name = "talk"
 main = "chat.js"
 compatibility_date = "2026-08-25"
+compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
 logpush = false
