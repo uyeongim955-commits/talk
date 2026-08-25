@@ -72,9 +72,10 @@ const MAX_ALL = 300 * 1024;
 
 // 원본은 한 장에 300~430KB라 그대로 심으면 SVG 가 수 MB 가 된다.
 // 무료 리사이즈 프록시로 96px 썸네일만 받아 base64 로 심는다.
+const THUMB_PX = 128;
 const thumbUrl = (name) =>
   `https://wsrv.nl/?url=${IMG_HOST.replace(/^https?:\/\//, "")}${encodeURIComponent(name)}01.webp` +
-  `&w=128&h=128&fit=cover&a=top&output=webp&q=82`;
+  `&w=${THUMB_PX}&h=${THUMB_PX}&fit=cover&a=top&output=webp&q=82`;
 
 function toBase64(bytes) {
   if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
@@ -290,7 +291,7 @@ async function diagnose() {
   return [
     "== 인물 01 이미지 진단 ==",
     `호스트 ${IMG_HOST}`,
-    `썸네일 96px · 한 장 상한 ${(MAX_ONE / 1024).toFixed(0)}KB · 합계 ${(MAX_ALL / 1024).toFixed(0)}KB · 최대 ${MAX_PICS}명`,
+    `썸네일 ${THUMB_PX}px · 한 장 상한 ${(MAX_ONE / 1024).toFixed(0)}KB · 합계 ${(MAX_ALL / 1024).toFixed(0)}KB · 최대 ${MAX_PICS}명 · 제한시간 ${PIC_TIMEOUT}ms`,
     `Buffer(nodejs_compat) ${typeof Buffer !== "undefined" ? "있음" : "없음"}`,
     "",
     ...rows,
