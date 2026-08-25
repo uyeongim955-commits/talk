@@ -36,9 +36,9 @@ const SEND = "#3d5a80";      // 보내기 버튼
 
 const HEAD_B = 56;           // 헤더 바닥
 const INPUT_H = 62;          // 입력바 높이
-const AV_X = 16;             // 프로필 x
-const BUB_L = 62;            // 말풍선 시작 x
-const MAXB = 398;            // 말풍선 최대 폭
+const AV_X = 14;             // 프로필 x
+const BUB_L = 70;            // 말풍선 시작 x
+const MAXB = 372;            // 말풍선 최대 폭
 const FS = 17;               // 메시지 글자 크기
 const LH = 24;               // 줄 높이
 
@@ -66,7 +66,7 @@ const PORTRAIT = new Set([
   "강도현", "한혜원", "정태양", "윤아린", "박연아", "이준", "문가인",
   "레바딘", "카에돈", "녹스", "필리아", "프시케", "리비안", "이그니펠",
 ]);
-const MAX_PICS = 6;
+const MAX_PICS = 8;
 const MAX_ONE = 60 * 1024;
 const MAX_ALL = 300 * 1024;
 
@@ -74,7 +74,7 @@ const MAX_ALL = 300 * 1024;
 // 무료 리사이즈 프록시로 96px 썸네일만 받아 base64 로 심는다.
 const thumbUrl = (name) =>
   `https://wsrv.nl/?url=${IMG_HOST.replace(/^https?:\/\//, "")}${encodeURIComponent(name)}01.webp` +
-  `&w=96&h=96&fit=cover&a=top&output=webp&q=82`;
+  `&w=128&h=128&fit=cover&a=top&output=webp&q=82`;
 
 function toBase64(bytes) {
   if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
@@ -232,7 +232,7 @@ function parseInput(url) {
     let text = k === -1 ? r : r.slice(k + 1).trim();
     if (!text) { text = nick; nick = ""; }
     if (nick.length > 12) { text = nick + (text ? " " + text : ""); nick = ""; }
-    return { kind, nick: fullName((nick || "익명").slice(0, 12)), text: text.slice(0, 120), unread };
+    return { kind, nick: fullName((nick || "익명").slice(0, 12)), text: text.slice(0, 180), unread };
   }).filter((m) => m.text);
 
   let members = get("m").split(/[;|]/).map((s) => s.trim()).filter(Boolean).slice(0, 7).map((row) => {
@@ -342,7 +342,7 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
   const chatBottom = H - INPUT_H - 12;
 
   // 높이 계산
-  const NAME_H = 17;
+  const NAME_H = 18;
   const laid = [];
   let showDay = !!day;
   let hSum = showDay ? 40 : 0;
@@ -353,10 +353,11 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
       hSum += 36;
       continue;
     }
-    m.lines = wrapText(m.text, FS, MAXB - 32, 4);
+    m.lines = wrapText(m.text, FS, MAXB - 32, 5);
     m.bw = Math.min(MAXB, Math.round(Math.max(...m.lines.map((l) => measure(l, FS)))) + 32);
     m.bh = m.lines.length * LH + 14;
     m.h = (m.head ? NAME_H : 0) + m.bh + (m.tail ? 8 : 3);
+    if (m.head) m.h = Math.max(m.h, 46 + (m.tail ? 8 : 3));
     laid.push(m);
     hSum += m.h;
   }
@@ -395,7 +396,7 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
 
     let by = y;
     if (m.head) {
-      out += `${avatar(AV_X, y, 38, m.nick, pics)}
+      out += `${avatar(AV_X, y, 46, m.nick, pics)}
       <text x="${BUB_L}" y="${y + 12}" class="mn">${esc(clip(m.nick, 12.5, 220))}</text>`;
       by = y + NAME_H;
     }
@@ -409,7 +410,8 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
 
     if (m.tail || m.unread) {
       const stampY = by + m.bh - 5;
-      let sx = BUB_L + m.bw + 7;
+      const stampW = (m.unread ? measure(m.unread, 11) + 5 : 0) + (m.tail ? measure(m.time, 11) : 0);
+      let sx = Math.min(BUB_L + m.bw + 7, W - 10 - stampW);
       if (m.unread) {
         out += `<text x="${sx}" y="${stampY}" class="unread">${esc(m.unread)}</text>`;
         sx += Math.round(measure(m.unread, 11)) + 5;
@@ -509,7 +511,7 @@ export default {
       });
     }
 
-    const wanted = [...data.members.map((m) => m.name), ...data.msgs.map((m) => m.nick)];
+    const wanted = [...data.msgs.map((m) => m.nick), ...data.members.map((m) => m.name)];
     const pics = request.method === "HEAD" ? new Map() : await loadPortraits(wanted);
 
     return new Response(request.method === "HEAD" ? null : chatSvg(data, pics), {
