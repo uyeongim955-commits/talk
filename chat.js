@@ -1,6 +1,7 @@
 /**
- * 단톡방 SVG Worker · 520x780 (세로형)
+ * 단톡방 SVG Worker · 620x400 (가로형)
  * 카카오톡/라인/인스타 DM 참고. 단일 컬럼 대화.
+ * 크랙 표시 상한(높이 약 230 CSS px)에 맞춰 낮고 넓게 잡음 — 세로를 키우면 글자가 작아진다.
  *
  * 파라미터
  * - r: 방 이름
@@ -26,21 +27,22 @@
  * - 이미지는 고정 호스트의 [주연 14명]01.webp 만. 임의 URL 불가.
  */
 
-const W = 520;
-const H = 780;
+const W = 620;
+const H = 400;
 
 const BG = "#94a8c2";        // 대화 배경
 const OTHER = "#ffffff";     // 말풍선
 const ACCENT = "#ef6b4e";    // 안읽음 표시
 const SEND = "#3d5a80";      // 보내기 버튼
 
-const HEAD_B = 56;           // 헤더 바닥
-const INPUT_H = 62;          // 입력바 높이
-const AV_X = 14;             // 프로필 x
-const BUB_L = 70;            // 말풍선 시작 x
-const MAXB = 372;            // 말풍선 최대 폭
+const HEAD_B = 46;           // 헤더 바닥
+const NOTICE_H = 28;         // 공지 바 높이
+const INPUT_H = 32;          // 입력바 높이
+const AV_X = 12;             // 프로필 x
+const BUB_L = 54;            // 말풍선 시작 x
+const MAXB = 470;            // 말풍선 최대 폭
 const FS = 17;               // 메시지 글자 크기
-const LH = 24;               // 줄 높이
+const LH = 23;               // 줄 높이
 
 const AVATARS = ["#6b8fd4", "#e0855a", "#4fa189", "#c76b9a", "#7a6bc7", "#d0a13c", "#4f9bb5", "#a8724f"];
 
@@ -219,7 +221,22 @@ function parseInput(url) {
   const base = /^\d{1,2}:\d{2}$/.test(get("t")) ? get("t") : "20:10";
   const notice = get("p").slice(0, 44);
 
-  const msgs = get("l").split(/[;|]/).map((s) => s.trim()).filter(Boolean).slice(0, 16).map((row) => {
+  // 모델이 "닉;내용" 처럼 ~ 대신 ; 를 쓴 경우 되붙인다
+  const rawRows = get("l").split(/[;|]/).map((s) => s.trim()).filter(Boolean);
+  const rows = [];
+  for (let i = 0; i < rawRows.length; i += 1) {
+    const cur = rawRows[i];
+    const bare = cur.replace(/^[!>]+/, "").trim();
+    const next = rawRows[i + 1];
+    if (!cur.includes("~") && CHARS[fullName(bare)] && next && !next.includes("~")) {
+      rows.push(`${bare}~${next}`);
+      i += 1;
+    } else {
+      rows.push(cur);
+    }
+  }
+
+  const msgs = rows.slice(0, 16).map((row) => {
     let r = row;
     let kind = "other";
     if (r.startsWith("!")) { kind = "sys"; r = r.slice(1).trim(); }
@@ -299,15 +316,14 @@ async function diagnose() {
 }
 
 // 프로필. 인물 01 이미지가 실리면 사진, 아니면 색 구분 실루엣
-// 프로필. 인물 01 썸네일이 실리면 사진, 아니면 색 구분 실루엣
-// 구형 안드로이드 WebView 대응으로 href 와 xlink:href 를 함께 준다
+// 프로필. 인물 01 썸네일이 실리면 원형 사진, 아니면 색 구분 실루엣
 function avatar(x, y, s, name, pics) {
   if (pics && pics.has(name)) {
     const id = `p${hash(name).toString(36)}`;
     return `<use href="#${id}" xlink:href="#${id}" x="${x}" y="${y}" width="${s}" height="${s}"/>`;
   }
   const c = avatarColor(name);
-  return `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="${s / 2}" fill="${mix(c, 0.82)}"/>
+  return `<circle cx="${x + s / 2}" cy="${y + s / 2}" r="${s / 2}" fill="${mix(c, 0.82)}"/>
   <circle cx="${x + s / 2}" cy="${y + s * 0.37}" r="${s * 0.163}" fill="${c}"/>
   <path d="M${x + s * 0.21} ${y + s * 0.87} a${s * 0.29} ${s * 0.27} 0 0 1 ${s * 0.58} 0 Z" fill="${c}"/>`;
 }
@@ -345,33 +361,31 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
     m.time = m.kind === "sys" ? "" : addTime(base, g);
   });
 
-  const chatTop = (notice ? HEAD_B + 36 : HEAD_B) + 14;
-  const chatBottom = H - INPUT_H - 12;
+  const chatTop = (notice ? HEAD_B + NOTICE_H : HEAD_B) + 7;
+  const chatBottom = H - INPUT_H - 6;
 
-  // 높이 계산
-  const NAME_H = 18;
+  const NAME_H = 15;
   const laid = [];
   let showDay = !!day;
-  let hSum = showDay ? 40 : 0;
+  let hSum = showDay ? 30 : 0;
   for (const m of items) {
     if (m.kind === "sys") {
-      m.h = 36;
+      m.h = 28;
       laid.push(m);
-      hSum += 36;
+      hSum += 28;
       continue;
     }
-    m.lines = wrapText(m.text, FS, MAXB - 32, 5);
-    m.bw = Math.min(MAXB, Math.round(Math.max(...m.lines.map((l) => measure(l, FS)))) + 32);
-    m.bh = m.lines.length * LH + 14;
-    m.h = (m.head ? NAME_H : 0) + m.bh + (m.tail ? 8 : 3);
-    if (m.head) m.h = Math.max(m.h, 46 + (m.tail ? 8 : 3));
+    m.lines = wrapText(m.text, FS, MAXB - 28, 3);
+    m.bw = Math.min(MAXB, Math.round(Math.max(...m.lines.map((l) => measure(l, FS)))) + 28);
+    m.bh = m.lines.length * LH + 12;
+    m.h = (m.head ? NAME_H : 0) + m.bh + (m.tail ? 7 : 3);
     laid.push(m);
     hSum += m.h;
   }
 
   // 넘치면 실제 대화창처럼 오래된 것부터 밀어낸다
   const avail = chatBottom - chatTop;
-  if (hSum > avail && showDay) { showDay = false; hSum -= 40; }
+  if (hSum > avail && showDay) { showDay = false; hSum -= 30; }
   while (laid.length > 1 && hSum > avail) {
     hSum -= laid.shift().h;
     if (laid.length && laid[0].kind !== "sys" && !laid[0].head) {
@@ -386,62 +400,62 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
 
   let out = "";
   if (showDay) {
-    const dw = Math.round(measure(day, 12)) + 30;
-    out += `<rect x="${CX - dw / 2}" y="${y + 3}" width="${dw}" height="25" rx="12.5" fill="#1d2b3a" opacity=".22"/>
-    <text x="${CX}" y="${y + 20}" text-anchor="middle" class="day">${esc(day)}</text>`;
-    y += 40;
+    const dw = Math.round(measure(day, 11)) + 24;
+    out += `<rect x="${CX - dw / 2}" y="${y}" width="${dw}" height="22" rx="11" fill="#1d2b3a" opacity=".22"/>
+    <text x="${CX}" y="${y + 15}" text-anchor="middle" class="day">${esc(day)}</text>`;
+    y += 30;
   }
 
   for (const m of laid) {
     if (m.kind === "sys") {
-      const sw = Math.round(measure(m.text, 12)) + 30;
-      out += `<rect x="${CX - sw / 2}" y="${y + 2}" width="${sw}" height="25" rx="12.5" fill="#1d2b3a" opacity=".18"/>
-      <text x="${CX}" y="${y + 19}" text-anchor="middle" class="sys">${esc(m.text)}</text>`;
+      const sw = Math.round(measure(m.text, 11)) + 24;
+      out += `<rect x="${CX - sw / 2}" y="${y}" width="${sw}" height="22" rx="11" fill="#1d2b3a" opacity=".18"/>
+      <text x="${CX}" y="${y + 15}" text-anchor="middle" class="sys">${esc(m.text)}</text>`;
       y += m.h;
       continue;
     }
 
     let by = y;
     if (m.head) {
-      out += `${avatar(AV_X, y, 46, m.nick, pics)}
-      <text x="${BUB_L}" y="${y + 12}" class="mn">${esc(clip(m.nick, 12.5, 220))}</text>`;
+      out += `${avatar(AV_X, y, 34, m.nick, pics)}
+      <text x="${BUB_L}" y="${y + 10}" class="mn">${esc(clip(m.nick, 11.5, 240))}</text>`;
       by = y + NAME_H;
     }
 
-    out += `<rect x="${BUB_L}" y="${by}" width="${m.bw}" height="${m.bh}" rx="17" fill="${OTHER}"/>`;
+    out += `<rect x="${BUB_L}" y="${by}" width="${m.bw}" height="${m.bh}" rx="13" fill="${OTHER}"/>`;
     out += m.lines.map((ln, i) =>
-      `<text x="${BUB_L + 16}" y="${by + 23 + i * LH}" class="msg">${esc(ln)}</text>`).join("");
+      `<text x="${BUB_L + 14}" y="${by + 21 + i * LH}" class="msg">${esc(ln)}</text>`).join("");
 
     if (m.tail || m.unread) {
-      const stampY = by + m.bh - 5;
-      const stampW = (m.unread ? measure(m.unread, 11) + 5 : 0) + (m.tail ? measure(m.time, 11) : 0);
-      let sx = Math.min(BUB_L + m.bw + 7, W - 10 - stampW);
+      const stampY = by + m.bh - 4;
+      const stampW = (m.unread ? measure(m.unread, 10) + 4 : 0) + (m.tail ? measure(m.time, 10) : 0);
+      let sx = Math.min(BUB_L + m.bw + 6, W - 8 - stampW);
       if (m.unread) {
         out += `<text x="${sx}" y="${stampY}" class="unread">${esc(m.unread)}</text>`;
-        sx += Math.round(measure(m.unread, 11)) + 5;
+        sx += Math.round(measure(m.unread, 10)) + 4;
       }
       if (m.tail) out += `<text x="${sx}" y="${stampY}" class="time">${m.time}</text>`;
     }
     y += m.h;
   }
 
-  const roomLabel = clip(room, 18, W - 190);
-  const nameW = Math.round(measure(roomLabel, 18));
+  const roomLabel = clip(room, 15, W - 210);
+  const nameW = Math.round(measure(roomLabel, 15));
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="단톡방 ${esc(room)}">
   <style>
     text { font-family: Pretendard, -apple-system, "SamsungOne", "Samsung Sans", system-ui, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
-    .htitle { font-size: 18px; font-weight: 700; fill: #141a21; letter-spacing: -.7px; }
-    .hcount { font-size: 12.5px; font-weight: 700; fill: #7b8794; letter-spacing: -.2px; }
-    .notice { font-size: 12.5px; font-weight: 600; fill: #6a5316; letter-spacing: -.35px; }
-    .day { font-size: 12px; font-weight: 600; fill: #ffffff; letter-spacing: -.2px; }
-    .sys { font-size: 12px; font-weight: 500; fill: #ffffff; letter-spacing: -.2px; }
-    .mn { font-size: 12.5px; font-weight: 600; fill: #33414f; letter-spacing: -.4px; }
-    .msg { font-size: ${FS}px; font-weight: 420; fill: #171b20; letter-spacing: -.45px; }
-    .time { font-size: 11px; font-weight: 500; fill: #4e5f73; letter-spacing: -.1px; }
-    .unread { font-size: 11px; font-weight: 700; fill: ${ACCENT}; letter-spacing: -.1px; }
-    .ph { font-size: 13.5px; font-weight: 450; fill: #9aa4b0; letter-spacing: -.35px; }
+    .htitle { font-size: 15px; font-weight: 700; fill: #141a21; letter-spacing: -.6px; }
+    .hcount { font-size: 11px; font-weight: 700; fill: #7b8794; letter-spacing: -.2px; }
+    .notice { font-size: 11px; font-weight: 600; fill: #6a5316; letter-spacing: -.3px; }
+    .day { font-size: 11px; font-weight: 600; fill: #ffffff; letter-spacing: -.2px; }
+    .sys { font-size: 11px; font-weight: 500; fill: #ffffff; letter-spacing: -.2px; }
+    .mn { font-size: 11.5px; font-weight: 600; fill: #33414f; letter-spacing: -.4px; }
+    .msg { font-size: ${FS}px; font-weight: 450; fill: #171b20; letter-spacing: -.45px; }
+    .time { font-size: 10px; font-weight: 500; fill: #4e5f73; letter-spacing: -.1px; }
+    .unread { font-size: 10px; font-weight: 700; fill: ${ACCENT}; letter-spacing: -.1px; }
+    .ph { font-size: 11px; font-weight: 450; fill: #9aa4b0; letter-spacing: -.3px; }
   </style>
   ${portraitDefs(pics)}
 
@@ -449,30 +463,30 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
 
   <rect x="0" y="0" width="${W}" height="${HEAD_B}" fill="#ffffff"/>
   <line x1="0" y1="${HEAD_B}" x2="${W}" y2="${HEAD_B}" stroke="#d4dbe4"/>
-  <path d="M24 20 L16 28 L24 36" fill="none" stroke="#2f3944" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
-  ${avatar(36, 12, 32, room, pics)}
-  <text x="78" y="34" class="htitle">${esc(roomLabel)}</text>
-  <rect x="${84 + nameW}" y="18" width="${20 + String(total).length * 7}" height="19" rx="9.5" fill="#eef1f5"/>
-  <text x="${94 + nameW + String(total).length * 3.5}" y="31.5" text-anchor="middle" class="hcount">${total}</text>
-  <circle cx="${W - 44}" cy="28" r="2.1" fill="#5c6875"/>
-  <circle cx="${W - 34}" cy="28" r="2.1" fill="#5c6875"/>
-  <circle cx="${W - 24}" cy="28" r="2.1" fill="#5c6875"/>
+  <path d="M20 16 L13 23 L20 30" fill="none" stroke="#2f3944" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  ${avatar(30, 10, 26, room, pics)}
+  <text x="64" y="28" class="htitle">${esc(roomLabel)}</text>
+  <rect x="${70 + nameW}" y="14" width="${17 + String(total).length * 6}" height="17" rx="8.5" fill="#eef1f5"/>
+  <text x="${78 + nameW + String(total).length * 3}" y="26" text-anchor="middle" class="hcount">${total}</text>
+  <circle cx="${W - 40}" cy="23" r="1.9" fill="#5c6875"/>
+  <circle cx="${W - 31}" cy="23" r="1.9" fill="#5c6875"/>
+  <circle cx="${W - 22}" cy="23" r="1.9" fill="#5c6875"/>
 
-  ${notice ? `<rect x="0" y="${HEAD_B}" width="${W}" height="36" fill="#fdf3d4"/>
-  <line x1="0" y1="${HEAD_B + 36}" x2="${W}" y2="${HEAD_B + 36}" stroke="#efe2b4"/>
-  <path d="M22 ${HEAD_B + 10} h13 v10 l-6.5 7 l-6.5 -7 Z" fill="#dfae32"/>
-  <text x="46" y="${HEAD_B + 23}" class="notice">${esc(clip(notice, 12.5, W - 68))}</text>` : ""}
+  ${notice ? `<rect x="0" y="${HEAD_B}" width="${W}" height="${NOTICE_H}" fill="#fdf3d4"/>
+  <line x1="0" y1="${HEAD_B + NOTICE_H}" x2="${W}" y2="${HEAD_B + NOTICE_H}" stroke="#efe2b4"/>
+  <path d="M16 ${HEAD_B + 8} h11 v8 l-5.5 6 l-5.5 -6 Z" fill="#dfae32"/>
+  <text x="36" y="${HEAD_B + 19}" class="notice">${esc(clip(notice, 11, W - 54))}</text>` : ""}
 
   ${out}
 
   <rect x="0" y="${H - INPUT_H}" width="${W}" height="${INPUT_H}" fill="#ffffff"/>
   <line x1="0" y1="${H - INPUT_H}" x2="${W}" y2="${H - INPUT_H}" stroke="#d4dbe4"/>
-  <line x1="18" y1="${H - 31}" x2="34" y2="${H - 31}" stroke="#98a3b0" stroke-width="2" stroke-linecap="round"/>
-  <line x1="26" y1="${H - 39}" x2="26" y2="${H - 23}" stroke="#98a3b0" stroke-width="2" stroke-linecap="round"/>
-  <rect x="46" y="${H - 46}" width="${W - 104}" height="31" rx="15.5" fill="#f0f3f7"/>
-  <text x="63" y="${H - 25}" class="ph">메시지 입력</text>
-  <circle cx="${W - 30}" cy="${H - 31}" r="16" fill="${SEND}"/>
-  <path d="M${W - 38} ${H - 38} L${W - 21} ${H - 31} L${W - 38} ${H - 24} L${W - 34.5} ${H - 31} Z" fill="#ffffff"/>
+  <line x1="14" y1="${H - 16}" x2="26" y2="${H - 16}" stroke="#98a3b0" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="20" y1="${H - 22}" x2="20" y2="${H - 10}" stroke="#98a3b0" stroke-width="1.8" stroke-linecap="round"/>
+  <rect x="36" y="${H - 25}" width="${W - 78}" height="18" rx="9" fill="#f0f3f7"/>
+  <text x="48" y="${H - 12}" class="ph">메시지 입력</text>
+  <circle cx="${W - 21}" cy="${H - 16}" r="11" fill="${SEND}"/>
+  <path d="M${W - 27} ${H - 21} L${W - 15} ${H - 16} L${W - 27} ${H - 11} L${W - 24.5} ${H - 16} Z" fill="#ffffff"/>
 </svg>`;
 }
 
@@ -508,6 +522,34 @@ export default {
     }
 
     const data = url.pathname === "/" ? parseInput(url) : null;
+
+    // ?x=2 : 같은 파라미터를 워커가 어떻게 읽었는지 텍스트로 보고
+    if (data && url.searchParams.get("x") === "2") {
+      const wantedD = [...data.msgs.map((m) => m.nick), ...data.members.map((m) => m.name)];
+      const picsD = await loadPortraits(wantedD);
+      const svgD = chatSvg(data, picsD);
+      const lines = [
+        "== 입력 해석 결과 ==",
+        `방 ${data.room} · 멤버 ${data.members.map((m) => m.name).join(", ") || "(없음)"}`,
+        `기준시각 ${data.base} · 날짜 ${data.day || "(없음)"} · 공지 ${data.notice || "(없음)"}`,
+        `메시지 ${data.msgs.length}개 · SVG ${(svgD.length / 1024).toFixed(0)}KB`,
+        "",
+        "번호  발신자        초상   내용",
+        ...data.msgs.map((m, i) => {
+          const who = m.kind === "sys" ? "(시스템)" : m.nick;
+          const pic = m.kind === "sys" ? "-" : (picsD.has(m.nick) ? "있음" : "없음");
+          return `${String(i + 1).padStart(2)}   ${who.padEnd(12)} ${pic.padEnd(5)} ${m.text}`;
+        }),
+        "",
+        "발신자가 익명이면 닉이 안 붙은 것 — l 은 닉~내용 형식이어야 함",
+        "초상 없음이면 그 이름이 주연 14명에 없는 것",
+      ];
+      return new Response(request.method === "HEAD" ? null : lines.join("\n"), {
+        status: 200,
+        headers: { ...responseHeaders("text/plain; charset=utf-8"), "Cache-Control": "no-store" },
+      });
+    }
+
     if (!data) {
       return new Response(request.method === "HEAD" ? null : "Invalid parameters.", {
         status: 400,
