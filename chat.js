@@ -21,8 +21,9 @@
  * 주의: 대화 내용이 URL 에 실려 Cloudflare 네트워크를 경유함.
  * 배포 후 Worker Settings > Observability 에서 Workers Logs 를 반드시 비활성화할 것.
  *
- * 방어
- * - 허용 파라미터 외 키·중복 키·3000자 초과 쿼리는 400.
+ * 방어 · 프챗급 방탄
+ * - 어떤 GET에도 400을 내지 않음: 미지 키·중복 키 무시, 전각 기호·&amp; 자동 교정,
+ *   초과 길이 절단, 닉 없는 발화는 직전 발화자 이어받기, 닉:내용 형식도 수용.
  * - 모든 텍스트의 XML 특수문자는 이스케이프.
  * - 이미지는 고정 호스트의 [주연 14명]01.webp 만. 임의 URL 불가.
  */
@@ -208,15 +209,34 @@ function addTime(base, minutes) {
   return `${ampm} ${h12}:${String(mm).padStart(2, "0")}`;
 }
 
-function parseInput(url) {
-  if (url.search.length > 3000) return null;
-  const allowed = new Set(["r", "d", "t", "p", "m", "l", "x", "i"]);
-  const seen = new Set();
-  for (const [key] of url.searchParams) {
-    if (!allowed.has(key) || seen.has(key)) return null;
-    seen.add(key);
+// 전각 기호를 반각으로 (프챗급 모델이 섞어 쓰는 ；～：！＋ 등)
+const FW_MAP = { "；": ";", "｜": "|", "～": "~", "：": ":", "！": "!", "？": "?", "＊": "*", "＋": " ", "　": " ", "＆": "&", "＝": "=" };
+function fwNorm(s) {
+  return s.replace(/[；｜～：！？＊＋　＆＝０-９]/g, (c) => FW_MAP[c] ?? String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+}
+
+// 프챗급 방탄 — 절대 400을 내지 않는다.
+// 경로 무관 · 미지 키 무시 · 중복 키는 첫 유효값 · 구조 깨진 전각 ＆＝·&amp;는 교정 · 초과 길이는 절단.
+function lenientParams(search, cap) {
+  let raw = search.startsWith("?") ? search.slice(1) : search;
+  if (raw.length > cap) raw = raw.slice(0, cap);
+  raw = raw
+    .replace(/&(amp;)+/gi, "&")
+    .replace(/%EF%BC%86/gi, "&").replace(/[＆]/g, "&")
+    .replace(/%EF%BC%9D/gi, "=").replace(/[＝]/g, "=");
+  let sp;
+  try { sp = new URLSearchParams(raw); } catch (e) { sp = new URLSearchParams(); }
+  const first = new Map();
+  for (const [rk, rv] of sp) {
+    const key = rk.trim().toLowerCase();
+    if (!first.has(key) || first.get(key) === "") first.set(key, String(rv));
   }
-  const get = (key) => (url.searchParams.get(key) ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  return first;
+}
+
+function parseInput(url) {
+  const first = lenientParams(url.search, 6000);
+  const get = (key) => fwNorm(first.get(key) ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim();
 
   const room = get("r").slice(0, 20) || "단톡방";
   const day = get("d").slice(0, 26);
@@ -238,6 +258,7 @@ function parseInput(url) {
     }
   }
 
+  let lastNick = "";
   const msgs = rows.slice(0, 16).map((row) => {
     let r = row;
     let kind = "other";
@@ -253,13 +274,22 @@ function parseInput(url) {
 
     if (kind === "sys") return { kind, nick: "", text: r.slice(0, 60), unread: "" };
 
-    const k = r.indexOf("~");
+    let k = r.indexOf("~");
+    if (k === -1) {
+      // "닉: 내용" 폴백 — 왼쪽이 주연 이름일 때만
+      const c = r.indexOf(":");
+      if (c > 0 && c <= 8 && CHARS[fullName(r.slice(0, c).trim())]) k = c;
+    }
     let nick = k === -1 ? "" : r.slice(0, k).trim();
     let text = k === -1 ? r : r.slice(k + 1).trim();
     if (!text) { text = nick; nick = ""; }
     if (nick.length > 12) { text = nick + (text ? " " + text : ""); nick = ""; }
-    return { kind, nick: fullName((nick || "익명").slice(0, 12)), text: text.slice(0, 180), unread };
+    // 닉이 빠진 발화는 직전 발화자가 이어 말한 것으로
+    const finalNick = fullName((nick || lastNick || "익명").slice(0, 12));
+    lastNick = finalNick;
+    return { kind, nick: finalNick, text: text.slice(0, 180), unread };
   }).filter((m) => m.text);
+  if (!msgs.length) msgs.push({ kind: "sys", nick: "", text: "메시지 수신 대기 중", unread: "" });
 
   let members = get("m").split(/[;|]/).map((s) => s.trim()).filter(Boolean).slice(0, 7).map((row) => {
     const k = row.indexOf("~");
@@ -379,27 +409,47 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
 
   const NAME_H = 15;
   const PAD = 10;
-  const laid = [];
-  let showDay = !!day;
-  let hSum = showDay ? 30 : 0;
-  for (const m of items) {
-    if (m.kind === "sys") {
-      m.h = 28;
-      laid.push(m);
-      hSum += 28;
-      continue;
+  const avail = chatBottom - chatTop;
+
+  // 모델이 말을 많이 넣어도 버리지 않는다 — 먼저 글자를 줄여 전부 담아보고,
+  // 최소 크기로도 안 되면 그때만 오래된 것부터 밀어낸다.
+  const SCALES = [1, 0.94, 0.88, 0.82, 0.76, 0.7];
+  const build = (scale) => {
+    const fs = Math.round(FS * scale * 2) / 2;
+    const lh = Math.round(LH * scale * 2) / 2;
+    const maxLines = scale < 0.85 ? 4 : 3;
+    const rows = [];
+    let showDay = !!day;
+    let hSum = showDay ? 30 : 0;
+    for (const src of items) {
+      const m = { ...src };
+      if (m.kind === "sys") {
+        m.h = 28;
+        rows.push(m);
+        hSum += 28;
+        continue;
+      }
+      m.lines = wrapText(m.text, fs, MAXB - 28, maxLines);
+      m.bw = Math.min(MAXB, Math.round(Math.max(...m.lines.map((l) => measure(l, fs)))) + 28);
+      m.bh = m.lines.length * lh + PAD;
+      m.h = (m.head ? NAME_H : 0) + m.bh + (m.tail ? 6 : 3);
+      rows.push(m);
+      hSum += m.h;
     }
-    m.lines = wrapText(m.text, FS, MAXB - 28, 3);
-    m.bw = Math.min(MAXB, Math.round(Math.max(...m.lines.map((l) => measure(l, FS)))) + 28);
-    m.bh = m.lines.length * LH + PAD;
-    m.h = (m.head ? NAME_H : 0) + m.bh + (m.tail ? 6 : 3);
-    laid.push(m);
-    hSum += m.h;
+    if (hSum > avail && showDay) { showDay = false; hSum -= 30; }
+    return { rows, hSum, showDay, fs, lh };
+  };
+
+  let fit = build(1);
+  for (const s of SCALES) {
+    fit = build(s);
+    if (fit.hSum <= avail) break;
   }
 
-  // 넘치면 실제 대화창처럼 오래된 것부터 밀어낸다
-  const avail = chatBottom - chatTop;
-  if (hSum > avail && showDay) { showDay = false; hSum -= 30; }
+  const { fs, lh } = fit;
+  let showDay = fit.showDay;
+  const laid = fit.rows;
+  let hSum = fit.hSum;
   while (laid.length > 1 && hSum > avail) {
     hSum -= laid.shift().h;
     if (laid.length && laid[0].kind !== "sys" && !laid[0].head) {
@@ -438,7 +488,7 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
 
     out += `<path d="${bubblePath(BUB_L, by, m.bw, m.bh, m.head)}" fill="${OTHER}" stroke="${BORDER}" stroke-width="1" filter="url(#bsh)"/>`;
     out += m.lines.map((ln, i) =>
-      `<text x="${BUB_L + 14}" y="${by + 21 + i * LH}" class="msg">${esc(ln)}</text>`).join("");
+      `<text x="${BUB_L + 14}" y="${(by + PAD / 2 + fs * 0.94 + i * lh).toFixed(1)}" class="msg">${esc(ln)}</text>`).join("");
 
     if (m.tail || m.unread) {
       const stampY = by + m.bh - 4;
@@ -456,7 +506,7 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
   const roomLabel = clip(room, 15, W - 210);
   const nameW = Math.round(measure(roomLabel, 15));
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  return `<?xml version="1.0" encoding="UTF-8"?><!--R3-->
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="단톡방 ${esc(room)}">
   <style>
     text { font-family: Pretendard, -apple-system, "SamsungOne", "Samsung Sans", system-ui, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
@@ -466,7 +516,7 @@ function chatSvg({ room, day, base, notice, msgs, members }, pics) {
     .day { font-size: 11px; font-weight: 600; fill: #7b8694; letter-spacing: -.2px; }
     .sys { font-size: 11px; font-weight: 500; fill: #7b8694; letter-spacing: -.2px; }
     .mn { font-size: 11.5px; font-weight: 600; fill: #667085; letter-spacing: -.35px; }
-    .msg { font-size: ${FS}px; font-weight: 450; fill: #1c1e21; letter-spacing: -.45px; }
+    .msg { font-size: ${fs}px; font-weight: 450; fill: #1c1e21; letter-spacing: -.45px; }
     .time { font-size: 10px; font-weight: 500; fill: #9aa3ae; letter-spacing: -.1px; }
     .unread { font-size: 10px; font-weight: 700; fill: ${ACCENT}; letter-spacing: 0; }
     .ph { font-size: 11px; font-weight: 450; fill: #9aa4b0; letter-spacing: -.3px; }
@@ -528,14 +578,14 @@ export default {
 
     const url = new URL(request.url);
 
-    if (url.pathname === "/" && url.searchParams.get("x") === "1") {
+    if (url.searchParams.get("x") === "1") {
       return new Response(request.method === "HEAD" ? null : await diagnose(), {
         status: 200,
         headers: { ...responseHeaders("text/plain; charset=utf-8"), "Cache-Control": "no-store" },
       });
     }
 
-    const data = url.pathname === "/" ? parseInput(url) : null;
+    const data = parseInput(url);
 
     // ?x=2 : 같은 파라미터를 워커가 어떻게 읽었는지 텍스트로 보고
     if (data && url.searchParams.get("x") === "2") {
@@ -561,13 +611,6 @@ export default {
       return new Response(request.method === "HEAD" ? null : lines.join("\n"), {
         status: 200,
         headers: { ...responseHeaders("text/plain; charset=utf-8"), "Cache-Control": "no-store" },
-      });
-    }
-
-    if (!data) {
-      return new Response(request.method === "HEAD" ? null : "Invalid parameters.", {
-        status: 400,
-        headers: responseHeaders("text/plain; charset=utf-8"),
       });
     }
 
