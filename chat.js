@@ -77,8 +77,9 @@ const MAX_ALL = 300 * 1024;
 // 원본은 한 장에 300~430KB라 그대로 심으면 SVG 가 수 MB 가 된다.
 // 무료 리사이즈 프록시로 96px 썸네일만 받아 base64 로 심는다.
 const THUMB_PX = 128;
-const thumbUrl = (name, code = "01", px = THUMB_PX) =>
-  `https://wsrv.nl/?url=${IMG_HOST.replace(/^https?:\/\//, "")}${encodeURIComponent(name)}${code}.webp` +
+const PROXY = ["https://wsrv.nl/?url=", "https://images.weserv.nl/?url="];
+const thumbUrl = (name, code = "01", px = THUMB_PX, p = 0) =>
+  `${PROXY[p] || PROXY[0]}${IMG_HOST.replace(/^https?:\/\//, "")}${encodeURIComponent(name)}${code}.webp` +
   `&w=${px}&h=${px}&fit=cover&a=top&output=webp&q=82`;
 
 function toBase64(bytes) {
@@ -91,7 +92,7 @@ function toBase64(bytes) {
 }
 
 // 이름 목록에 대응하는 01 이미지를 받아 data URI 로 반환. 실패분은 그냥 빠진다.
-const PIC_TIMEOUT = 2500;
+const PIC_TIMEOUT = 4500;
 
 async function loadPortraits(names) {
   const uniq = [...new Set(names)].filter((n) => PORTRAIT.has(n)).slice(0, MAX_PICS);
@@ -102,19 +103,21 @@ async function loadPortraits(names) {
   // 시간 안에 못 받은 인물은 실루엣으로 내려간다.
   const late = new Promise((res) => setTimeout(() => res(null), PIC_TIMEOUT));
   const one = async (n, code = "01", px = THUMB_PX) => {
-    try {
-      const res = await fetch(thumbUrl(n, code, px), {
-        cf: { cacheEverything: true, cacheTtl: 604800 },
-      });
-      if (!res.ok) return null;
-      const type = (res.headers.get("content-type") || "image/webp").split(";")[0].trim();
-      if (!/^image\//.test(type)) return null;
-      const buf = new Uint8Array(await res.arrayBuffer());
-      if (!buf.length || buf.length > MAX_ONE) return null;
-      return [n, buf, type];
-    } catch (e) {
-      return null;
+    // 프록시 한쪽이 실패하면 다른 도메인으로 한 번 더
+    for (let p = 0; p < PROXY.length; p += 1) {
+      try {
+        const res = await fetch(thumbUrl(n, code, px, p), {
+          cf: { cacheEverything: true, cacheTtl: 604800 },
+        });
+        if (!res.ok) continue;
+        const type = (res.headers.get("content-type") || "image/webp").split(";")[0].trim();
+        if (!/^image\//.test(type)) continue;
+        const buf = new Uint8Array(await res.arrayBuffer());
+        if (!buf.length || buf.length > MAX_ONE) continue;
+        return [n, buf, type];
+      } catch (e) { /* 다음 프록시 */ }
     }
+    return null;
   };
   const got = await Promise.all(uniq.map((n) => Promise.race([one(n), late])));
 
@@ -330,12 +333,14 @@ async function diagnose() {
     }
   };
   const rows = await Promise.all(names.map(async (n) => {
-    const [raw, thumb] = await Promise.all([
+    const [raw, t0, t1] = await Promise.all([
       probe(`${IMG_HOST}${encodeURIComponent(n)}01.webp`),
-      probe(thumbUrl(n)),
+      probe(thumbUrl(n, "01", THUMB_PX, 0)),
+      probe(thumbUrl(n, "01", THUMB_PX, 1)),
     ]);
-    const ok = thumb.size > 0 && thumb.size <= MAX_ONE && /^image\//.test(thumb.type) ? "OK" : "제외";
-    return `${n}\t원본 ${raw.line}\t썸네일 ${thumb.line} ${thumb.type}\t${ok}`;
+    const good = (t) => t.size > 0 && t.size <= MAX_ONE && /^image\//.test(t.type);
+    const ok = good(t0) ? "OK(프록시1)" : good(t1) ? "OK(프록시2)" : "제외";
+    return `${n}\t원본 ${raw.line}\t프록시1 ${t0.line}\t프록시2 ${t1.line}\t${ok}`;
   }));
   return [
     "== 인물 01 이미지 진단 ==",
@@ -362,9 +367,9 @@ function avatar(x, y, s, name, pics) {
     return `<use href="#${id}" xlink:href="#${id}" x="${x}" y="${y}" width="${s}" height="${s}"/>`;
   }
   const c = avatarColor(name);
-  return `<circle cx="${x + s / 2}" cy="${y + s / 2}" r="${s / 2}" fill="${mix(c, 0.82)}"/>
-  <circle cx="${x + s / 2}" cy="${y + s * 0.37}" r="${s * 0.163}" fill="${c}"/>
-  <path d="M${x + s * 0.21} ${y + s * 0.87} a${s * 0.29} ${s * 0.27} 0 0 1 ${s * 0.58} 0 Z" fill="${c}"/>`;
+  const ini = [...String(name || "?")][0] || "?";
+  return `<circle cx="${x + s / 2}" cy="${y + s / 2}" r="${s / 2}" fill="${mix(c, 0.8)}"/>
+  <text x="${x + s / 2}" y="${(y + s * 0.685).toFixed(1)}" text-anchor="middle" font-size="${(s * 0.46).toFixed(1)}" font-weight="700" fill="${c}" letter-spacing="-0.5">${esc(ini)}</text>`;
 }
 
 // 같은 인물이 여러 번 나와도 이미지는 defs 에 한 번만 심는다
